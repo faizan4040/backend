@@ -1,19 +1,44 @@
-const mysql = require("mysql2");
+const express = require("express");
+const cors = require("cors");
+const mongoose = require("mongoose");
 require("dotenv").config();
 
-const db = mysql.createConnection({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
+const authRoutes = require("./routes/auth");
+const propertyRoutes = require("./routes/property");
+const locationRoutes = require("./routes/location");
+const bookmarkRoutes = require("./routes/bookmark");
+const messageRoutes = require("./routes/message");
+const propertyUserRoutes = require("./routes/propertyuser");
+
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// static images
+app.use("/uploads", express.static("uploads"));
+
+// MongoDB connection
+mongoose
+  .connect(process.env.MONGO_URI)
+  .then(() => console.log("MongoDB connected!"))
+  .catch((err) => console.error("MongoDB connection error:", err));
+
+// routes
+app.use("/api/auth", authRoutes);
+app.use("/api/property", propertyRoutes);
+app.use("/api/location", locationRoutes);
+app.use("/api/bookmark", bookmarkRoutes);
+app.use("/api/message", messageRoutes);
+app.use("/api/property-user", propertyUserRoutes);
+
+app.get("/", (req, res) => {
+  res.send("Backend running!");
 });
 
-db.connect((err) => {
-  if (err) {
-    console.error("DB connection failed:", err);
-  } else {
-    console.log("Connected to MySQL database");
-  }
-});
+const PORT = process.env.PORT || 5000;
 
-module.exports = db;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});

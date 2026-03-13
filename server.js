@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const mongoose = require("mongoose"); // ✅ ADD THIS
 require("dotenv").config();
 
 const authRoutes = require("./routes/auth");
@@ -18,6 +19,12 @@ app.use(express.urlencoded({ extended: true }));
 // static images
 app.use("/uploads", express.static("uploads"));
 
+// MongoDB connection
+mongoose
+  .connect(process.env.MONGO_URI)
+  .then(() => console.log("MongoDB connected!"))
+  .catch((err) => console.error("MongoDB connection error:", err));
+
 // routes
 app.use("/api/auth", authRoutes);
 app.use("/api/property", propertyRoutes);
@@ -35,5 +42,3 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
-
-

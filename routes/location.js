@@ -1,114 +1,84 @@
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
-const db = require("../db");
+const mongoose = require("mongoose");
 
+/* ================= LOCATION MODEL ================= */
+const locationSchema = new mongoose.Schema({
+  title: String,
+  image: String,
+  available: Number,
+  status: { type: Number, default: 1 },
+});
+
+const Location =
+  mongoose.models.Location || mongoose.model("Location", locationSchema);
+
+/* ================= MULTER ================= */
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null,"uploads/"),
-  filename: (req,file,cb)=> cb(null, Date.now()+"-"+file.originalname)
+  destination: (req, file, cb) => cb(null, "uploads/"),
+  filename: (req, file, cb) => cb(null, Date.now() + "-" + file.originalname),
 });
 const upload = multer({ storage });
 
-// Get Locations
-router.get("/locations", (req, res) => {
+/* ================= GET Locations ================= */
+router.get("/locations", async (req, res) => {
+  try {
+    const locations = await Location.find(
+      { status: 1 },
+      "title image available"
+    ).sort({ _id: -1 });
 
-  const sql = `
-    SELECT id,title,image,available
-    FROM locations
-    WHERE status = 1
-    ORDER BY id DESC
-  `;
-
-  db.query(sql, (err, result) => {
-
-    if (err) {
-      console.log(err);
-      return res.status(500).json({ message: "Database error" });
-    }
-
-    res.json(result);
-
-  });
-
+    res.json(locations);
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ message: "Database error" });
+  }
 });
 
-router.post("/add-location", upload.single("image"), (req, res) => {
+/* ================= ADD Location ================= */
+router.post("/add-location", upload.single("image"), async (req, res) => {
+  try {
+    const { title, available } = req.body;
+    const image = req.file ? req.file.filename : null;
 
-  const { title, available } = req.body;
-
-  let image = req.file ? req.file.filename : null;
-
-  const sql = `
-  INSERT INTO locations (title,image,available)
-  VALUES (?,?,?)`;
-
-  db.query(sql, [title, image, available], (err, result) => {
-
-    if (err) {
-      console.log(err);
-      return res.status(500).json({ message: "Error inserting location" });
-    }
+    const newLocation = await Location.create({ title, image, available });
 
     res.json({
       message: "Location added successfully",
-      id: result.insertId
+      id: newLocation._id,
     });
-
-  });
-
-});
-router.put("/update-location/:id", upload.single("image"), (req, res) => {
-
-  const { title, available } = req.body;
-  const id = req.params.id;
-
-  let image = req.file ? req.file.filename : null;
-
-  if (image) {
-
-    const sql = `
-      UPDATE locations 
-      SET title=?, image=?, available=? 
-      WHERE id=?`;
-
-    db.query(sql, [title, image, available, id], (err) => {
-
-      if (err) return res.status(500).json(err);
-
-      res.json({ message: "Location updated" });
-
-    });
-
-  } else {
-
-    const sql = `
-      UPDATE locations 
-      SET title=?, available=? 
-      WHERE id=?`;
-
-    db.query(sql, [title, available, id], (err) => {
-
-      if (err) return res.status(500).json(err);
-
-      res.json({ message: "Location updated" });
-
-    });
-
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ message: "Error inserting location" });
   }
-
 });
-router.delete("/delete-location/:id", (req, res) => {
 
-  const sql = "DELETE FROM locations WHERE id=?";
+/* ================= UPDATE Location ================= */
+router.put("/update-location/:id", upload.single("image"), async (req, res) => {
+  try {
+    const { title, available } = req.body;
+    const image = req.file ? req.file.filename : null;
 
-  db.query(sql, [req.params.id], (err) => {
+    const updateData = { title, available };
+    if (image) updateData.image = image;
 
-    if (err) return res.status(500).json(err);
+    await Location.findByIdAndUpdate(req.params.id, updateData);
 
+    res.json({ message: "Location updated" });
+  } catch (err) {
+    res.status(500).json({ message: "Database error", details: err.message });
+  }
+});
+
+/* ================= DELETE Location ================= */
+router.delete("/delete-location/:id", async (req, res) => {
+  try {
+    await Location.findByIdAndDelete(req.params.id);
     res.json({ message: "Location deleted" });
-
-  });
-
+  } catch (err) {
+    res.status(500).json({ message: "Database error", details: err.message });
+  }
 });
 
 module.exports = router;

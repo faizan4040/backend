@@ -1,65 +1,61 @@
 const express = require("express");
 const router = express.Router();
-const db = require("../db");
+const mongoose = require("mongoose");
 
-router.get("/bookmarked-properties", (req, res) => {
-
-  const sql = `
-    SELECT id, title, price, address
-    FROM properties
-    WHERE bookmark = 1 AND status = 1
-    ORDER BY id DESC
-  `;
-
-  db.query(sql, (err, result) => {
-    if (err) {
-      console.log(err);
-      return res.status(500).json({ message: "Database error" });
-    }
-
-    res.json(result);
-  });
+/* ================= PROPERTY MODEL ================= */
+const propertySchema = new mongoose.Schema({
+  title: String,
+  price: Number,
+  address: String,
+  bookmark: { type: Boolean, default: false },
+  status: { type: Number, default: 1 },
 });
 
-/* ================= Remove bookmark the properties ================= */
-router.patch("/remove-bookmark/:id", (req, res) => {
+const Property =
+  mongoose.models.Property || mongoose.model("Property", propertySchema);
 
-  const propertyId = req.params.id;
+/* ================= GET Bookmarked Properties ================= */
+router.get("/bookmarked-properties", async (req, res) => {
+  try {
+    const properties = await Property.find(
+      { bookmark: true, status: 1 },
+      "title price address"
+    ).sort({ _id: -1 });
 
-  const sql = `
-    UPDATE properties
-    SET bookmark = 0
-    WHERE id = ?
-  `;
+    res.json(properties);
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ message: "Database error" });
+  }
+});
 
-  db.query(sql, [propertyId], (err) => {
-    if (err) return res.status(500).json({ message: "DB error" });
-
+/* ================= Remove Bookmark ================= */
+router.patch("/remove-bookmark/:id", async (req, res) => {
+  try {
+    await Property.findByIdAndUpdate(req.params.id, { bookmark: false });
     res.json({ message: "Bookmark removed" });
-  });
+  } catch (err) {
+    res.status(500).json({ message: "DB error" });
+  }
 });
-router.post("/update-bookmark/:id", (req, res) => {
-  const propertyId = req.params.id;
 
-  const sql = `
-    UPDATE properties 
-    SET bookmark = IF(bookmark = 1, 0, 1)
-    WHERE id = ?
-  `;
+/* ================= Toggle Bookmark ================= */
+router.post("/update-bookmark/:id", async (req, res) => {
+  try {
+    const property = await Property.findById(req.params.id);
 
-  db.query(sql, [propertyId], (err, result) => {
-
-    if (err) {
-      console.log(err);
-      return res.status(500).json({ message: "Database error" });
+    if (!property) {
+      return res.status(404).json({ message: "Property not found" });
     }
 
-    res.json({
-      success: true,
-      message: "Bookmark updated"
-    });
+    property.bookmark = !property.bookmark;
+    await property.save();
 
-  });
-
+    res.json({ success: true, message: "Bookmark updated" });
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ message: "Database error" });
+  }
 });
+
 module.exports = router;

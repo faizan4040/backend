@@ -1,55 +1,76 @@
 const express = require("express");
 const router = express.Router();
-const db = require("../db");
+const mongoose = require("mongoose");
 
-router.post("/user", (req, res) => {
-  const { user_id, page = 1, limit = 5 } = req.body;
-
-  const offset = (page - 1) * limit;
-
-  // Get properties with pagination
-  const sql = `
-    SELECT * 
-    FROM properties 
-    WHERE user_id = ?
-    ORDER BY id DESC
-    LIMIT ? OFFSET ?
-  `;
-
-  db.query(sql, [user_id, Number(limit), Number(offset)], (err, results) => {
-    if (err) return res.status(500).json({ message: "DB error" });
-
-    // total count query
-    const countSql = `SELECT COUNT(*) as total FROM properties WHERE user_id = ?`;
-
-    db.query(countSql, [user_id], (err2, countResult) => {
-      if (err2) return res.status(500).json({ message: "Count error" });
-
-      const formatted = results.map(p => ({
-        ...p,
-        images: JSON.parse(p.images || "[]"),
-        features: JSON.parse(p.features || "[]")
-      }));
-
-      res.json({
-        data: formatted,
-        total: countResult[0].total,
-        page: Number(page),
-        totalPages: Math.ceil(countResult[0].total / limit)
-      });
-    });
-  });
+/* ================= PROPERTY MODEL ================= */
+const propertySchema = new mongoose.Schema({
+  user_id: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+  offerType: String,
+  propertyType: String,
+  pgType: String,
+  price: Number,
+  rooms: Number,
+  bathrooms: Number,
+  parking: String,
+  address: String,
+  locality: String,
+  nearbyRoad: String,
+  singlePrice: Number,
+  doublePrice: Number,
+  triplePrice: Number,
+  meals: String,
+  title: String,
+  slug: String,
+  description: String,
+  features: mongoose.Schema.Types.Mixed,
+  images: [String],
+  bookmark: { type: Boolean, default: false },
+  status: { type: Number, default: 1 },
 });
-/* ================= proerties status update  ================= */
-router.patch("/:id/status", (req, res) => {
-  const propertyId = req.params.id;
-  const { status } = req.body;
 
-  const sql = "UPDATE properties SET status = ? WHERE id = ?";
-  db.query(sql, [status, propertyId], (err, result) => {
-    if (err) return res.status(500).json({ message: "Database error" });
+const Property =
+  mongoose.models.Property || mongoose.model("Property", propertySchema);
+
+/* ================= GET USER PROPERTIES (with pagination) ================= */
+router.post("/user", async (req, res) => {
+  try {
+    const { user_id, page = 1, limit = 5 } = req.body;
+    const skip = (page - 1) * limit;
+
+    const [results, total] = await Promise.all([
+      Property.find({ user_id })
+        .sort({ _id: -1 })
+        .skip(skip)
+        .limit(Number(limit)),
+      Property.countDocuments({ user_id }),
+    ]);
+
+    const formatted = results.map((p) => {
+      const obj = p.toObject();
+      obj.images = Array.isArray(obj.images) ? obj.images : [];
+      obj.features = Array.isArray(obj.features) ? obj.features : [];
+      return obj;
+    });
+
+    res.json({
+      data: formatted,
+      total,
+      page: Number(page),
+      totalPages: Math.ceil(total / limit),
+    });
+  } catch (err) {
+    res.status(500).json({ message: "DB error", details: err.message });
+  }
+});
+
+/* ================= UPDATE PROPERTY STATUS ================= */
+router.patch("/:id/status", async (req, res) => {
+  try {
+    await Property.findByIdAndUpdate(req.params.id, { status: req.body.status });
     res.json({ message: "Status updated successfully" });
-  });
+  } catch (err) {
+    res.status(500).json({ message: "Database error", details: err.message });
+  }
 });
 
 module.exports = router;

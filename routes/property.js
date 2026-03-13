@@ -1,179 +1,62 @@
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
-const db = require("../db");
-const nodemailer = require("nodemailer");
-router.get("/slug/:slug", (req, res) => { 
-  const { slug } = req.params;
+const mongoose = require("mongoose");
 
-  const sql = `
-    SELECT 
-      properties.*,
-     CONCAT(users.firstName, ' ', users.lastName) AS owner_name,
-      users.phone AS user_phone,
-      users.role AS user_role
-    FROM properties
-    JOIN users ON users.id = properties.user_id
-    WHERE properties.slug = ?
-    LIMIT 1
-  `;
-
-  db.query(sql, [slug], (err, results) => {
-
-    if (err) {
-      console.log(err);
-      return res.status(500).json({ message: "Database error" });
-    }
-
-    if (!results.length) {
-      return res.status(404).json({ message: "Property not found" });
-    }
-
-    const property = results[0];
-
-    const COMPANY_PHONE = "9876543210";
-
-    // ✅ Phone Logic
-    property.phone =
-      property.user_role === "Broker"
-        ? property.user_phone
-        : COMPANY_PHONE;
-
-    // ✅ Safe JSON Parser
-    const parseJSON = (data) => {
-      if (!data) return [];
-
-      if (Array.isArray(data)) return data;
-
-      try {
-        return JSON.parse(data);
-      } catch {
-        return data.split(",");
-      }
-    };
-
-    property.images = parseJSON(property.images);
-    property.features = parseJSON(property.features);
-
-    return res.json(property);
-  });
-});
-router.get("/menu", (req, res) => {
-  const sql = `
-    SELECT propertyType, rooms, title, pgType
-    FROM properties
-    WHERE status = 1
-  `;
-
-  db.query(sql, (err, result) => {
-    if (err) return res.status(500).json({ message: "DB error", error: err });
-
-    const menu = { Houses: [], Flats: [], "PG/Hostel": [] };
-
-    const seenHouses = new Set();
-    const seenFlats = new Set();
-    const seenPg = new Set();
-
-    // All links
-    menu.Houses.push({ title: "All Houses", path: "/property/all-houses" });
-    menu.Flats.push({ title: "All Flats", path: "/property/all-flats" });
-    menu["PG/Hostel"].push({ title: "All PG/Hostel", path: "/property/all-pg" });
-
-    result.forEach(item => {
-      if (!item.propertyType) return;
-
-      const type = item.propertyType.toLowerCase().trim();
-
-      let slug = "";
-      let displayTitle = "";
-
-      // 🏠 HOUSES
-      if (type === "house" || type === "houses") {
-
-        const rooms = item.rooms || 0;
-
-        slug = rooms
-          ? `${rooms}-room`
-          : item.title.toLowerCase().replace(/\s+/g, "-");
-
-        displayTitle = rooms
-          ? `${rooms} Room Set`
-          : item.title;
-
-        if (!seenHouses.has(slug)) {
-          menu.Houses.push({
-            title: displayTitle,
-            path: `/property/${slug}`
-          });
-
-          seenHouses.add(slug);
-        }
-      }
-
-      // 🏢 FLATS
-      else if (type === "flat" || type === "flats") {
-
-        const rooms = item.rooms || 0;
-
-        slug = rooms
-          ? `${rooms}-bhk`
-          : item.title.toLowerCase().replace(/\s+/g, "-");
-
-        displayTitle = rooms
-          ? `${rooms} BHK Flats`
-          : item.title;
-
-        if (!seenFlats.has(slug)) {
-          menu.Flats.push({
-            title: displayTitle,
-            path: `/property/${slug}`
-          });
-
-          seenFlats.add(slug);
-        }
-      }
-
-      // 🛏 PG / HOSTEL
-      else if (type === "pg" || type === "hostel") {
-
-        if (!item.pgType) return;
-
-        slug = item.pgType
-          .toLowerCase()
-          .replace(/\s+/g, "-");
-
-        displayTitle = item.pgType;
-
-        if (!seenPg.has(slug)) {
-          menu["PG/Hostel"].push({
-            title: displayTitle,
-            path: `/property/${slug}`
-          });
-
-          seenPg.add(slug);
-        }
-      }
-
-    });
-
-    res.json(menu);
-  });
+/* ================= MODELS ================= */
+const userSchema = new mongoose.Schema({
+  firstName: String,
+  lastName: String,
+  email: String,
+  phone: String,
+  password: String,
+  role: String,
+  photo: String,
 });
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "uploads/");
-  },
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + "-" + file.originalname);
-  }
+const propertySchema = new mongoose.Schema({
+  user_id: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+  offerType: String,
+  propertyType: String,
+  pgType: String,
+  price: Number,
+  rooms: Number,
+  bathrooms: Number,
+  parking: String,
+  address: String,
+  locality: String,
+  nearbyRoad: String,
+  singlePrice: Number,
+  doublePrice: Number,
+  triplePrice: Number,
+  meals: String,
+  title: String,
+  slug: String,
+  description: String,
+  features: mongoose.Schema.Types.Mixed,
+  images: [String],
+  bookmark: { type: Boolean, default: false },
+  status: { type: Number, default: 1 },
 });
+
+const locationSchema = new mongoose.Schema({
+  title: String,
+  image: String,
+  available: { type: Number, default: 0 },
+  status: { type: Number, default: 1 },
+});
+
+const User = mongoose.models.User || mongoose.model("User", userSchema);
+const Property = mongoose.models.Property || mongoose.model("Property", propertySchema);
+const Location = mongoose.models.Location || mongoose.model("Location", locationSchema);
+
+/* ================= HELPERS ================= */
+const slugify = (text) =>
+  text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 
 const parseJSON = (data, fallback = []) => {
   if (!data) return fallback;
-
   if (Array.isArray(data)) return data;
-
   if (typeof data === "string") {
     try {
       return JSON.parse(data);
@@ -181,417 +64,247 @@ const parseJSON = (data, fallback = []) => {
       return data.includes(",") ? data.split(",") : [data];
     }
   }
-
   return fallback;
 };
 
-const upload = multer({ storage: storage });
+const COMPANY_PHONE = "9876543210";
 
-router.get("/all-properties", (req, res) => {
+/* ================= MULTER ================= */
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, "uploads/"),
+  filename: (req, file, cb) => cb(null, Date.now() + "-" + file.originalname),
+});
+const upload = multer({ storage });
 
-  let { location, type, rooms, baths, page = 1, limit = 6 } = req.query;
-
-  page = Number(page);
-  limit = Number(limit);
-
-  const offset = (page - 1) * limit;
-
-  let sql = `
-    FROM properties
-    JOIN users ON users.id = properties.user_id
-    WHERE properties.status = 1
-  `;
-
-  let params = [];
-
-  // location
-  // location filter
-if (location) {
-
-  location = location.replace(/-/g, " ");
-
-  sql += " AND LOWER(properties.locality) LIKE LOWER(?)";
-
-  params.push(`%${location}%`);
-}
-
-  // type
-  if (type) {
-    sql += " AND properties.propertyType=?";
-    params.push(type);
-  }
-
-  // rooms
-  if (rooms) {
-    sql += " AND properties.rooms=?";
-    params.push(Number(rooms));
-  }
-
-  // baths
-  if (baths) {
-    sql += " AND properties.bathrooms=?";
-    params.push(Number(baths));
-  }
-
-  /* ================= COUNT QUERY ================= */
-
-  const countQuery = `SELECT COUNT(*) as total ${sql}`;
-
-  db.query(countQuery, params, (err, countResult) => {
-
-    if (err) return res.status(500).json({ message: "DB error" });
-
-    const total = countResult[0].total;
-
-    /* ================= DATA QUERY ================= */
-
-    const dataQuery = `
-      SELECT 
-        properties.*,
-        CONCAT(users.firstName,' ',users.lastName) AS owner_name,
-        users.phone AS user_phone,
-        users.role AS user_role
-      ${sql}
-      ORDER BY properties.id DESC
-      LIMIT ? OFFSET ?
-    `;
-
-    db.query(
-      dataQuery,
-      [...params, limit, offset],
-      (err, results) => {
-
-        if (err) return res.status(500).json({ message: "DB error" });
-
-        const COMPANY_PHONE = "9876543210";
-
-        const parseJSON = (data) => {
-          if (!data) return [];
-          try { return JSON.parse(data); }
-          catch { return data.split(","); }
-        };
-
-        const properties = results.map((property) => {
-
-          property.phone =
-            property.user_role === "Broker"
-              ? property.user_phone
-              : COMPANY_PHONE;
-
-          property.images = parseJSON(property.images);
-          property.features = parseJSON(property.features);
-
-          return property;
-        });
-
-        res.json({
-          data: properties,
-          total,
-          page,
-          totalPages: Math.ceil(total / limit)
-        });
-      }
+/* ================= GET BY SLUG ================= */
+router.get("/slug/:slug", async (req, res) => {
+  try {
+    const property = await Property.findOne({ slug: req.params.slug }).populate(
+      "user_id",
+      "firstName lastName phone role"
     );
-  });
-});
 
-router.post("/", upload.array("images"), (req, res) => {
+    if (!property) return res.status(404).json({ message: "Property not found" });
 
-  const {
-    user_id,
-    offerType,
-    propertyType,
-     pgType,
-    price,
-    rooms,
-    bathrooms,
-    parking,
-    address,
-    locality,
-    title,
-    description,
-    nearbyRoad,
-    features,
-    singlePrice,
-    doublePrice,
-    triplePrice,
-    meals,
-  } = req.body;
+    const result = property.toObject();
+    const owner = result.user_id;
 
-  const images = req.files.map(file => file.filename);
-
-  const slugify = (text) => {
-    return text
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/(^-|-$)/g, "");
-  };
-
-  const slug = slugify(title);
-
-  const sql = `
-  INSERT INTO properties
-  (
-    user_id,
-    offerType,
-    propertyType,
-     pgType,
-    price,
-    rooms,
-    bathrooms,
-    parking,
-    address,
-    locality,
-    nearbyRoad,
-    singlePrice,
-    doublePrice,
-    triplePrice,
-    meals,
-    title,
-    slug,
-    description,
-    features,
-    images
-  )
-  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-  `;
-
-  db.query(sql, [
-    user_id,
-    offerType,
-    propertyType,
-     pgType,
-    price,
-    rooms,
-    bathrooms,
-    parking,
-    address,
-    locality,
-    nearbyRoad,
-    singlePrice,
-    doublePrice,
-    triplePrice,
-    meals,
-    title,
-    slug,
-    description,
-    features,
-    JSON.stringify(images)
-  ], (err, result) => {
-
-    if (err) {
-      console.log(err);
-      return res.status(500).json({ message: "Database error" });
-    }
-
-    // 🔵 LOCATION AVAILABLE +1 UPDATE
-    const updateLocation = `
-      UPDATE locations 
-      SET available = available + 1 
-      WHERE title LIKE ?
-    `;
-
-    db.query(updateLocation, [`%${locality}%`], (err2) => {
-
-      if (err2) {
-        console.log("Location update error:", err2);
-      }
-
-      res.json({
-        message: "Property submitted successfully",
-        id: result.insertId
-      });
-
-    });
-
-  });
-
-});
-
-/* ===== GET SINGLE PROPERTY ===== */
-router.get("/property/:id", (req, res) => {
-  const { id } = req.params;
-
-  db.query(
-    "SELECT * FROM properties WHERE id = ?",
-    [id],
-    (err, results) => {
-
-      if (err) {
-        console.error(err);
-        return res.status(500).json({ message: "Database error" });
-      }
-
-      // ✅ IMPORTANT CHECK
-      if (!results.length) {
-        return res.status(404).json({
-          message: "Property not found"
-        });
-      }
-
-      const property = results[0];
-
-      property.images = parseJSON(property.images);
-      property.features = parseJSON(property.features);
-
-      res.json(property);
-    }
-  );
-});
-
-/* ===== UPDATE PROPERTY ===== */
-router.put("/:id", upload.array("images"), (req, res) => {
-
-  const propertyId = req.params.id;
-
-  const {
-    offerType,
-    propertyType,
-    price,
-    rooms,
-    bathrooms,
-    parking,
-    address,
-    locality,
-    title,
-    description,
-    nearbyRoad,
-    features,
-    singlePrice,
-    doublePrice,
-    triplePrice,
-    meals,
-    existingImages
-  } = req.body;
-
-  // 👇 parse existing images coming from frontend
-  let remainingImages = [];
-  if (existingImages) {
-    try {
-      remainingImages = JSON.parse(existingImages);
-    } catch {
-      remainingImages = [];
-    }
-  }
-
-  // 👇 new uploaded images
-  let newImages = [];
-  if (req.files && req.files.length > 0) {
-    newImages = req.files.map(file => file.filename);
-  }
-
-  // 👇 combine remaining old + new
-  const finalImages = [...remainingImages, ...newImages];
-
-  const slugify = (text) => {
-    return text
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/(^-|-$)/g, "");
-  };
-
-  const slug = slugify(title);
-
-  const updateSql = `
-    UPDATE properties SET
-      offerType=?,
-      propertyType=?,
-      price=?,
-      rooms=?,
-      bathrooms=?,
-      parking=?,
-      address=?,
-      locality=?,
-      nearbyRoad=?,
-      singlePrice=?,
-      doublePrice=?,
-      triplePrice=?,
-      meals=?,
-      title=?,
-      slug=?,
-      description=?,
-      features=?,
-      images=?
-    WHERE id=?
-  `;
-
-  db.query(updateSql, [
-    offerType,
-    propertyType,
-    price,
-    rooms,
-    bathrooms,
-    parking,
-    address,
-    locality,
-    nearbyRoad,
-    singlePrice,
-    doublePrice,
-    triplePrice,
-    meals,
-    title,
-    slug,
-    description,
-    features,
-    JSON.stringify(finalImages),
-    propertyId
-  ], (err) => {
-
-    if (err) {
-      console.log(err);
-      return res.status(500).json({ message: "Update failed" });
-    }
-
-    res.json({ message: "Property updated successfully" });
-
-  });
-
-});
-router.get("/top-properties", (req, res) => {
-
-  const sql = `
-  SELECT *
-  FROM properties
-  ORDER BY price DESC
-  LIMIT 3
-  `;
-
-  db.query(sql, (err, result) => {
-
-    if (err) {
-      console.log(err);
-      return res.status(500).json({ message: "Server error" });
-    }
-
-    if (result.length === 0) {
-      return res.json({ message: "Property not found" });
-    }
+    result.owner_name = `${owner.firstName} ${owner.lastName}`;
+    result.user_phone = owner.phone;
+    result.user_role = owner.role;
+    result.phone = owner.role === "Broker" ? owner.phone : COMPANY_PHONE;
+    result.images = parseJSON(result.images);
+    result.features = parseJSON(result.features);
 
     res.json(result);
-
-  });
-
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ message: "Database error" });
+  }
 });
 
-router.get("/:id", (req, res) => {
-    const propertyId = req.params.id;
+/* ================= GET MENU ================= */
+router.get("/menu", async (req, res) => {
+  try {
+    const properties = await Property.find(
+      { status: 1 },
+      "propertyType rooms title pgType"
+    );
 
-    const sql = "SELECT * FROM properties WHERE id = ?";
+    const menu = { Houses: [], Flats: [], "PG/Hostel": [] };
+    const seenHouses = new Set();
+    const seenFlats = new Set();
+    const seenPg = new Set();
 
-    db.query(sql, [propertyId], (err, result) => {
+    menu.Houses.push({ title: "All Houses", path: "/property/all-houses" });
+    menu.Flats.push({ title: "All Flats", path: "/property/all-flats" });
+    menu["PG/Hostel"].push({ title: "All PG/Hostel", path: "/property/all-pg" });
 
-        if (err) {
-            console.log(err);
-            return res.status(500).json({ message: "Server error" });
+    properties.forEach((item) => {
+      if (!item.propertyType) return;
+      const type = item.propertyType.toLowerCase().trim();
+
+      if (type === "house" || type === "houses") {
+        const rooms = item.rooms || 0;
+        const slug = rooms ? `${rooms}-room` : item.title.toLowerCase().replace(/\s+/g, "-");
+        const displayTitle = rooms ? `${rooms} Room Set` : item.title;
+        if (!seenHouses.has(slug)) {
+          menu.Houses.push({ title: displayTitle, path: `/property/${slug}` });
+          seenHouses.add(slug);
         }
-
-        if (result.length === 0) {
-            return res.status(404).json({ message: "Property not found" });
+      } else if (type === "flat" || type === "flats") {
+        const rooms = item.rooms || 0;
+        const slug = rooms ? `${rooms}-bhk` : item.title.toLowerCase().replace(/\s+/g, "-");
+        const displayTitle = rooms ? `${rooms} BHK Flats` : item.title;
+        if (!seenFlats.has(slug)) {
+          menu.Flats.push({ title: displayTitle, path: `/property/${slug}` });
+          seenFlats.add(slug);
         }
-
-        res.json(result[0]);
+      } else if (type === "pg" || type === "hostel") {
+        if (!item.pgType) return;
+        const slug = item.pgType.toLowerCase().replace(/\s+/g, "-");
+        if (!seenPg.has(slug)) {
+          menu["PG/Hostel"].push({ title: item.pgType, path: `/property/${slug}` });
+          seenPg.add(slug);
+        }
+      }
     });
 
+    res.json(menu);
+  } catch (err) {
+    res.status(500).json({ message: "DB error", error: err.message });
+  }
+});
+
+/* ================= GET ALL PROPERTIES (with filters + pagination) ================= */
+router.get("/all-properties", async (req, res) => {
+  try {
+    let { location, type, rooms, baths, page = 1, limit = 6 } = req.query;
+    page = Number(page);
+    limit = Number(limit);
+    const skip = (page - 1) * limit;
+
+    const query = { status: 1 };
+
+    if (location) {
+      const cleaned = location.replace(/-/g, " ");
+      query.locality = { $regex: cleaned, $options: "i" };
+    }
+    if (type) query.propertyType = type;
+    if (rooms) query.rooms = Number(rooms);
+    if (baths) query.bathrooms = Number(baths);
+
+    const total = await Property.countDocuments(query);
+
+    const properties = await Property.find(query)
+      .populate("user_id", "firstName lastName phone role")
+      .sort({ _id: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    const data = properties.map((p) => {
+      const result = p.toObject();
+      const owner = result.user_id;
+      result.owner_name = `${owner.firstName} ${owner.lastName}`;
+      result.user_phone = owner.phone;
+      result.user_role = owner.role;
+      result.phone = owner.role === "Broker" ? owner.phone : COMPANY_PHONE;
+      result.images = parseJSON(result.images);
+      result.features = parseJSON(result.features);
+      return result;
+    });
+
+    res.json({ data, total, page, totalPages: Math.ceil(total / limit) });
+  } catch (err) {
+    res.status(500).json({ message: "DB error", error: err.message });
+  }
+});
+
+/* ================= ADD PROPERTY ================= */
+router.post("/", upload.array("images"), async (req, res) => {
+  try {
+    const {
+      user_id, offerType, propertyType, pgType, price, rooms, bathrooms,
+      parking, address, locality, title, description, nearbyRoad, features,
+      singlePrice, doublePrice, triplePrice, meals,
+    } = req.body;
+
+    const images = req.files.map((file) => file.filename);
+    const slug = slugify(title);
+
+    const newProperty = await Property.create({
+      user_id, offerType, propertyType, pgType, price, rooms, bathrooms,
+      parking, address, locality, nearbyRoad, singlePrice, doublePrice,
+      triplePrice, meals, title, slug, description,
+      features: parseJSON(features),
+      images,
+    });
+
+    // Update location available count
+    await Location.updateOne(
+      { title: { $regex: locality, $options: "i" } },
+      { $inc: { available: 1 } }
+    );
+
+    res.json({ message: "Property submitted successfully", id: newProperty._id });
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ message: "Database error" });
+  }
+});
+
+/* ================= GET SINGLE PROPERTY BY ID ================= */
+router.get("/property/:id", async (req, res) => {
+  try {
+    const property = await Property.findById(req.params.id);
+    if (!property) return res.status(404).json({ message: "Property not found" });
+
+    const result = property.toObject();
+    result.images = parseJSON(result.images);
+    result.features = parseJSON(result.features);
+
+    res.json(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Database error" });
+  }
+});
+
+/* ================= UPDATE PROPERTY ================= */
+router.put("/:id", upload.array("images"), async (req, res) => {
+  try {
+    const {
+      offerType, propertyType, price, rooms, bathrooms, parking,
+      address, locality, title, description, nearbyRoad, features,
+      singlePrice, doublePrice, triplePrice, meals, existingImages,
+    } = req.body;
+
+    let remainingImages = [];
+    if (existingImages) {
+      try { remainingImages = JSON.parse(existingImages); } catch { remainingImages = []; }
+    }
+
+    const newImages = req.files ? req.files.map((f) => f.filename) : [];
+    const finalImages = [...remainingImages, ...newImages];
+    const slug = slugify(title);
+
+    await Property.findByIdAndUpdate(req.params.id, {
+      offerType, propertyType, price, rooms, bathrooms, parking,
+      address, locality, nearbyRoad, singlePrice, doublePrice,
+      triplePrice, meals, title, slug, description,
+      features: parseJSON(features),
+      images: finalImages,
+    });
+
+    res.json({ message: "Property updated successfully" });
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ message: "Update failed" });
+  }
+});
+
+/* ================= TOP PROPERTIES ================= */
+router.get("/top-properties", async (req, res) => {
+  try {
+    const properties = await Property.find().sort({ price: -1 }).limit(3);
+    if (!properties.length) return res.json({ message: "Property not found" });
+    res.json(properties);
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+/* ================= GET BY ID ================= */
+router.get("/:id", async (req, res) => {
+  try {
+    const property = await Property.findById(req.params.id);
+    if (!property) return res.status(404).json({ message: "Property not found" });
+    res.json(property);
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ message: "Server error" });
+  }
 });
 
 module.exports = router;
