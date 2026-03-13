@@ -37,6 +37,3 @@ app.listen(PORT, () => {
 });
 
 
-
-// git add .
-// PS C:\Users\Lenovo\Desktop\backend> git commit -m "fix render start file"
