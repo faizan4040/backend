@@ -1,83 +1,50 @@
 const express = require("express");
 const router = express.Router();
-const multer = require("multer");
-const mongoose = require("mongoose");
+const Location = require("../models/Location");
+const authMiddleware = require("../middleware/auth");
 
-/* ================= LOCATION MODEL ================= */
-const locationSchema = new mongoose.Schema({
-  title: String,
-  image: String,
-  available: Number,
-  status: { type: Number, default: 1 },
-});
-
-const Location =
-  mongoose.models.Location || mongoose.model("Location", locationSchema);
-
-/* ================= MULTER ================= */
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, "uploads/"),
-  filename: (req, file, cb) => cb(null, Date.now() + "-" + file.originalname),
-});
-const upload = multer({ storage });
-
-/* ================= GET Locations ================= */
-router.get("/locations", async (req, res) => {
+// ─── GET /api/location ────────────────────────────────────────
+router.get("/", async (req, res) => {
   try {
-    const locations = await Location.find(
-      { status: 1 },
-      "title image available"
-    ).sort({ _id: -1 });
-
-    res.json(locations);
+    const locations = await Location.find().sort({ city: 1 });
+    res.json({ success: true, locations });
   } catch (err) {
-    console.log(err);
-    res.status(500).json({ message: "Database error" });
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
-/* ================= ADD Location ================= */
-router.post("/add-location", upload.single("image"), async (req, res) => {
+// ─── GET /api/location/:id ────────────────────────────────────
+router.get("/:id", async (req, res) => {
   try {
-    const { title, available } = req.body;
-    const image = req.file ? req.file.filename : null;
-
-    const newLocation = await Location.create({ title, image, available });
-
-    res.json({
-      message: "Location added successfully",
-      id: newLocation._id,
-    });
+    const location = await Location.findById(req.params.id);
+    if (!location) return res.status(404).json({ success: false, message: "Location not found" });
+    res.json({ success: true, location });
   } catch (err) {
-    console.log(err);
-    res.status(500).json({ message: "Error inserting location" });
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
-/* ================= UPDATE Location ================= */
-router.put("/update-location/:id", upload.single("image"), async (req, res) => {
+// ─── POST /api/location (protected) ──────────────────────────
+router.post("/", authMiddleware, async (req, res) => {
   try {
-    const { title, available } = req.body;
-    const image = req.file ? req.file.filename : null;
+    const { city, state, country, pincode, address, latitude, longitude } = req.body;
 
-    const updateData = { title, available };
-    if (image) updateData.image = image;
+    if (!city) return res.status(400).json({ success: false, message: "City is required" });
 
-    await Location.findByIdAndUpdate(req.params.id, updateData);
-
-    res.json({ message: "Location updated" });
+    const location = await Location.create({ city, state, country, pincode, address, latitude, longitude });
+    res.status(201).json({ success: true, message: "Location created", location });
   } catch (err) {
-    res.status(500).json({ message: "Database error", details: err.message });
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
-/* ================= DELETE Location ================= */
-router.delete("/delete-location/:id", async (req, res) => {
+// ─── DELETE /api/location/:id (protected) ────────────────────
+router.delete("/:id", authMiddleware, async (req, res) => {
   try {
     await Location.findByIdAndDelete(req.params.id);
-    res.json({ message: "Location deleted" });
+    res.json({ success: true, message: "Location deleted" });
   } catch (err) {
-    res.status(500).json({ message: "Database error", details: err.message });
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 

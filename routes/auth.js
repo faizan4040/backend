@@ -1,215 +1,114 @@
 const express = require("express");
 const router = express.Router();
-const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const multer = require("multer");
-const mongoose = require("mongoose");
+const User = require("../models/User");
+const authMiddleware = require("../middleware/auth");
 
-/* ================= USER MODEL ================= */
-const userSchema = new mongoose.Schema({
-  firstName: String,
-  lastName: String,
-  email: { type: String, unique: true },
-  phone: String,
-  password: String,
-  role: String,
-  photo: String,
-});
+// Helper: generate JWT
+const generateToken = (user) => {
+  return jwt.sign(
+    { id: user._id, email: user.email },
+    process.env.JWT_SECRET,
+    { expiresIn: "7d" }
+  );
+};
 
-const User = mongoose.models.User || mongoose.model("User", userSchema);
-
-/* ================= MULTER ================= */
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "uploads/");
-  },
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + "-" + file.originalname);
-  },
-});
-
-const upload = multer({ storage });
-
-/* ================= OTP ================= */
-const sendOTPEmail = require("../utils/sendMail");
-
-let otpStore = {};
-
-router.post("/send-otp", async (req, res) => {
-  const { email } = req.body;
-
-  const otp = Math.floor(100000 + Math.random() * 900000);
-  otpStore[email] = otp;
-
-  await sendOTPEmail(email, "Your OTP Code", `<h2>Your OTP is: ${otp}</h2>`);
-
-  res.json({ message: "OTP sent" });
-});
-
-router.post("/verify-otp", (req, res) => {
-  const { email, otp } = req.body;
-
-  if (otpStore[email] == otp) {
-    delete otpStore[email];
-    return res.json({ verified: true });
-  }
-
-  res.status(400).json({ message: "Invalid OTP" });
-});
-
-/* ================= REGISTER ================= */
+// ─── POST /api/auth/register ──────────────────────────────────
 router.post("/register", async (req, res) => {
-  const { firstName, lastName, email, phone, password, role } = req.body;
-
   try {
-    // Check if user exists
+    const { name, email, password, phone } = req.body;
+
+    if (!name || !email || !password) {
+      return res.status(400).json({ success: false, message: "Name, email and password are required" });
+    }
+
     const existingUser = await User.findOne({ email });
     if (existingUser) {
-      return res.status(400).json({ message: "User already exists" });
+      return res.status(409).json({ success: false, message: "Email already registered" });
     }
 
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Create user
-    const newUser = await User.create({
-      firstName,
-      lastName,
-      email,
-      phone,
-      password: hashedPassword,
-      role,
-    });
-
-    const token = jwt.sign(
-      { id: newUser._id },
-      process.env.JWT_SECRET,
-      { expiresIn: "1h" }
-    );
+    const user = await User.create({ name, email, password, phone });
 
     res.status(201).json({
-      message: "User registered successfully",
-      token,
-      user: {
-        id: newUser._id,
-        firstName,
-        lastName,
-        email,
-        phone,
-        role,
-      },
-    });
-  } catch (err) {
-    res.status(500).json({ message: "Server error", details: err.message });
-  }
-});
-
-/* ================= LOGIN ================= */
-router.post("/login", async (req, res) => {
-  const { email, password } = req.body;
-
-  try {
-    const user = await User.findOne({ email });
-
-    if (!user) {
-      return res.status(400).json({ message: "Invalid Email" });
-    }
-
-    const match = await bcrypt.compare(password, user.password);
-
-    if (!match) {
-      return res.status(400).json({ message: "Invalid Password" });
-    }
-
-    const token = jwt.sign(
-      { id: user._id },
-      process.env.JWT_SECRET,
-      { expiresIn: "1d" }
-    );
-
-    res.json({
-      token,
+      success: true,
+      message: "Registration successful",
+      token: generateToken(user),
       user: {
         id: user._id,
-        firstName: user.firstName,
-        lastName: user.lastName,
+        name: user.name,
         email: user.email,
         phone: user.phone,
         role: user.role,
-        photo: user.photo,
       },
     });
   } catch (err) {
-    res.status(500).json({ message: "Server error", details: err.message });
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
-/* ================= UPDATE PROFILE ================= */
-router.put("/update-profile", upload.single("photo"), (req, res) => {
+// ─── POST /api/auth/login ─────────────────────────────────────
+router.post("/login", async (req, res) => {
   try {
-    const authHeader = req.headers.authorization;
+    const { email, password } = req.body;
 
-    if (!authHeader) {
-      return res.status(401).json({
-        error: true,
-        message: "Authorization header missing. Please login again.",
-      });
+    if (!email || !password) {
+      return res.status(400).json({ success: false, message: "Email and password are required" });
     }
 
-    if (!authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({
-        error: true,
-        message: "Invalid token format. Token must start with Bearer.",
-      });
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
-    const token = authHeader.split(" ")[1];
-
-    if (!token) {
-      return res.status(401).json({ error: true, message: "Token not found." });
+    const isMatch = await user.matchPassword(password);
+    if (!isMatch) {
+      return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
-    jwt.verify(token, process.env.JWT_SECRET, async (err, decoded) => {
-      if (err) {
-        return res.status(401).json({
-          error: true,
-          message: "Token expired or invalid. Please login again.",
-        });
-      }
-
-      const userId = decoded.id;
-      const { firstName, lastName, email, role, phone } = req.body;
-      const photo = req.file ? req.file.filename : null;
-
-      try {
-        const updateData = { firstName, lastName, email, role, phone };
-        if (photo) updateData.photo = photo;
-
-        await User.findByIdAndUpdate(userId, updateData);
-
-        const updatedUser = await User.findById(userId).select(
-          "firstName lastName email phone role photo"
-        );
-
-        res.json({
-          error: false,
-          message: "Profile updated successfully",
-          user: updatedUser,
-        });
-      } catch (dbErr) {
-        res.status(500).json({
-          error: true,
-          message: "Database update failed.",
-          details: dbErr.message,
-        });
-      }
+    res.json({
+      success: true,
+      message: "Login successful",
+      token: generateToken(user),
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        avatar: user.avatar,
+      },
     });
-  } catch (error) {
-    res.status(500).json({
-      error: true,
-      message: "Server error",
-      details: error.message,
-    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ─── GET /api/auth/profile (protected) ───────────────────────
+router.get("/profile", authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select("-password");
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+    res.json({ success: true, user });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ─── PUT /api/auth/profile (protected) ───────────────────────
+router.put("/profile", authMiddleware, async (req, res) => {
+  try {
+    const { name, phone, avatar } = req.body;
+
+    const user = await User.findByIdAndUpdate(
+      req.user.id,
+      { name, phone, avatar },
+      { new: true, runValidators: true }
+    ).select("-password");
+
+    res.json({ success: true, message: "Profile updated", user });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 

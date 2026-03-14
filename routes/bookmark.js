@@ -1,60 +1,58 @@
 const express = require("express");
 const router = express.Router();
-const mongoose = require("mongoose");
+const Bookmark = require("../models/Bookmark");
+const authMiddleware = require("../middleware/auth");
 
-/* ================= PROPERTY MODEL ================= */
-const propertySchema = new mongoose.Schema({
-  title: String,
-  price: Number,
-  address: String,
-  bookmark: { type: Boolean, default: false },
-  status: { type: Number, default: 1 },
-});
-
-const Property =
-  mongoose.models.Property || mongoose.model("Property", propertySchema);
-
-/* ================= GET Bookmarked Properties ================= */
-router.get("/bookmarked-properties", async (req, res) => {
+// ─── GET /api/bookmark (my bookmarks, protected) ──────────────
+router.get("/", authMiddleware, async (req, res) => {
   try {
-    const properties = await Property.find(
-      { bookmark: true, status: 1 },
-      "title price address"
-    ).sort({ _id: -1 });
+    const bookmarks = await Bookmark.find({ user: req.user.id })
+      .populate({
+        path: "property",
+        populate: [{ path: "location" }, { path: "owner", select: "name email phone" }],
+      })
+      .sort({ createdAt: -1 });
 
-    res.json(properties);
+    res.json({ success: true, bookmarks });
   } catch (err) {
-    console.log(err);
-    res.status(500).json({ message: "Database error" });
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
-/* ================= Remove Bookmark ================= */
-router.patch("/remove-bookmark/:id", async (req, res) => {
+// ─── POST /api/bookmark (add, protected) ─────────────────────
+router.post("/", authMiddleware, async (req, res) => {
   try {
-    await Property.findByIdAndUpdate(req.params.id, { bookmark: false });
-    res.json({ message: "Bookmark removed" });
-  } catch (err) {
-    res.status(500).json({ message: "DB error" });
-  }
-});
+    const { propertyId } = req.body;
 
-/* ================= Toggle Bookmark ================= */
-router.post("/update-bookmark/:id", async (req, res) => {
-  try {
-    const property = await Property.findById(req.params.id);
-
-    if (!property) {
-      return res.status(404).json({ message: "Property not found" });
+    if (!propertyId) {
+      return res.status(400).json({ success: false, message: "propertyId is required" });
     }
 
-    property.bookmark = !property.bookmark;
-    await property.save();
+    const existing = await Bookmark.findOne({ user: req.user.id, property: propertyId });
+    if (existing) {
+      return res.status(409).json({ success: false, message: "Already bookmarked" });
+    }
 
-    res.json({ success: true, message: "Bookmark updated" });
+    const bookmark = await Bookmark.create({ user: req.user.id, property: propertyId });
+    res.status(201).json({ success: true, message: "Bookmarked successfully", bookmark });
   } catch (err) {
-    console.log(err);
-    res.status(500).json({ message: "Database error" });
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ─── DELETE /api/bookmark/:propertyId (remove, protected) ────
+router.delete("/:propertyId", authMiddleware, async (req, res) => {
+  try {
+    const bookmark = await Bookmark.findOneAndDelete({
+      user: req.user.id,
+      property: req.params.propertyId,
+    });
+
+    if (!bookmark) return res.status(404).json({ success: false, message: "Bookmark not found" });
+
+    res.json({ success: true, message: "Bookmark removed" });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 

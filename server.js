@@ -1,7 +1,8 @@
 const express = require("express");
 const cors = require("cors");
-const mongoose = require("mongoose"); // ✅ ADD THIS
 require("dotenv").config();
+
+const connectDB = require("./config/db");
 
 const authRoutes = require("./routes/auth");
 const propertyRoutes = require("./routes/property");
@@ -12,20 +13,18 @@ const propertyUserRoutes = require("./routes/propertyuser");
 
 const app = express();
 
+// ─── Middleware ───────────────────────────────────────────────
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// static images
+// Static files (uploaded images)
 app.use("/uploads", express.static("uploads"));
 
-// MongoDB connection
-mongoose
-  .connect(process.env.MONGO_URI)
-  .then(() => console.log("MongoDB connected!"))
-  .catch((err) => console.error("MongoDB connection error:", err));
+// ─── Database Connection ──────────────────────────────────────
+connectDB();
 
-// routes
+// ─── Routes ──────────────────────────────────────────────────
 app.use("/api/auth", authRoutes);
 app.use("/api/property", propertyRoutes);
 app.use("/api/location", locationRoutes);
@@ -33,12 +32,24 @@ app.use("/api/bookmark", bookmarkRoutes);
 app.use("/api/message", messageRoutes);
 app.use("/api/property-user", propertyUserRoutes);
 
+// Health check
 app.get("/", (req, res) => {
-  res.send("Backend running!");
+  res.json({ status: "ok", message: "Backend is running!" });
 });
 
-const PORT = process.env.PORT || 5000;
+// ─── 404 Handler ─────────────────────────────────────────────
+app.use((req, res) => {
+  res.status(404).json({ success: false, message: "Route not found" });
+});
 
+// ─── Global Error Handler ─────────────────────────────────────
+app.use((err, req, res, next) => {
+  console.error("Unhandled error:", err.message);
+  res.status(500).json({ success: false, message: "Internal server error" });
+});
+
+// ─── Start Server ─────────────────────────────────────────────
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`✅ Server running on port ${PORT}`);
 });

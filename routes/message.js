@@ -1,58 +1,92 @@
 const express = require("express");
 const router = express.Router();
-const mongoose = require("mongoose");
-const sendMail = require("../utils/sendMail");
+const Message = require("../models/Message");
+const authMiddleware = require("../middleware/auth");
 
-/* ================= MODELS ================= */
-const userSchema = new mongoose.Schema({
-  firstName: String,
-  lastName: String,
-  email: String,
-  phone: String,
-  password: String,
-  role: String,
-  photo: String,
-});
-
-const propertySchema = new mongoose.Schema({
-  user_id: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-  title: String,
-  price: Number,
-  address: String,
-  bookmark: { type: Boolean, default: false },
-  status: { type: Number, default: 1 },
-});
-
-const User = mongoose.models.User || mongoose.model("User", userSchema);
-const Property = mongoose.models.Property || mongoose.model("Property", propertySchema);
-
-/* ================= SEND MESSAGE ================= */
-router.post("/send-message", async (req, res) => {
-  const { property_id, message } = req.body;
-
+// ─── GET /api/message/inbox (protected) ──────────────────────
+router.get("/inbox", authMiddleware, async (req, res) => {
   try {
-    // Find property and populate owner details
-    const property = await Property.findById(property_id).populate(
-      "user_id",
-      "email firstName"
-    );
+    const messages = await Message.find({ receiver: req.user.id })
+      .populate("sender", "name email avatar")
+      .populate("property", "title images")
+      .sort({ createdAt: -1 });
 
-    if (!property) {
-      return res.status(404).json({ message: "Owner not found" });
+    res.json({ success: true, messages });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ─── GET /api/message/sent (protected) ───────────────────────
+router.get("/sent", authMiddleware, async (req, res) => {
+  try {
+    const messages = await Message.find({ sender: req.user.id })
+      .populate("receiver", "name email avatar")
+      .populate("property", "title images")
+      .sort({ createdAt: -1 });
+
+    res.json({ success: true, messages });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ─── POST /api/message (send, protected) ─────────────────────
+router.post("/", authMiddleware, async (req, res) => {
+  try {
+    const { receiverId, propertyId, content } = req.body;
+
+    if (!receiverId || !content) {
+      return res.status(400).json({ success: false, message: "receiverId and content are required" });
     }
 
-    const owner = property.user_id;
+    if (receiverId === req.user.id) {
+      return res.status(400).json({ success: false, message: "Cannot send message to yourself" });
+    }
 
-    await sendMail(
-      owner.email,
-      "New Property Inquiry",
-      `<h3>Hello ${owner.firstName}</h3><p>You have a new message:</p><p>${message}</p>`
+    const message = await Message.create({
+      sender: req.user.id,
+      receiver: receiverId,
+      property: propertyId || null,
+      content,
+    });
+
+    res.status(201).json({ success: true, message: "Message sent", data: message });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ─── PUT /api/message/:id/read (mark as read, protected) ─────
+router.put("/:id/read", authMiddleware, async (req, res) => {
+  try {
+    const msg = await Message.findOneAndUpdate(
+      { _id: req.params.id, receiver: req.user.id },
+      { isRead: true },
+      { new: true }
     );
 
-    res.json({ message: "Message sent successfully" });
+    if (!msg) return res.status(404).json({ success: false, message: "Message not found" });
+
+    res.json({ success: true, message: "Marked as read", data: msg });
   } catch (err) {
-    console.log(err);
-    res.status(500).json({ message: "Mail error" });
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ─── DELETE /api/message/:id (protected) ─────────────────────
+router.delete("/:id", authMiddleware, async (req, res) => {
+  try {
+    const msg = await Message.findOneAndDelete({
+      _id: req.params.id,
+      $or: [{ sender: req.user.id }, { receiver: req.user.id }],
+    });
+
+    if (!msg) return res.status(404).json({ success: false, message: "Message not found" });
+
+    res.json({ success: true, message: "Message deleted" });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
