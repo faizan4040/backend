@@ -3,48 +3,67 @@ const bcrypt = require("bcryptjs");
 
 const userSchema = new mongoose.Schema(
   {
-    name: {
-      type:     String,
-      required: [true, "Name is required"],
-      trim:     true,
+    firstName: {
+      type: String,
+      required: [true, "First name is required"],
+      trim: true,
+    },
+    lastName: {
+      type: String,
+      required: [true, "Last name is required"],
+      trim: true,
     },
     email: {
-      type:      String,
-      required:  [true, "Email is required"],
-      unique:    true,
+      type: String,
+      required: [true, "Email is required"],
+      unique: true,
       lowercase: true,
-      trim:      true,
-    },
-    password: {
-      type:      String,
-      required:  [true, "Password is required"],
-      minlength: 6,
+      trim: true,
     },
     phone: {
-      type:    String,
+      type: String,
       default: "",
     },
-    avatar: {
-      type:    String,
-      default: "",
+    password: {
+      type: String,
+      required: [true, "Password is required"],
+      minlength: 6,
     },
     role: {
-      type:    String,
-      enum:    ["user", "admin"],
+      type: String,
+      enum: ["Owner", "Broker", "user", "admin"],
       default: "user",
+    },
+    avatar: {
+      type: String,
+      default: "",
+    },
+    // ─── OTP Fields ───────────────────────────────────────────
+    otp: {
+      type: String,
+      default: null,
+    },
+    otpExpiry: {
+      type: Date,
+      default: null,
+    },
+    isEmailVerified: {
+      type: Boolean,
+      default: false,
     },
   },
   { timestamps: true }
 );
 
-// ✅ FIXED — removed next parameter, Express 5 compatible
-userSchema.pre("save", async function () {
-  if (!this.isModified("password")) return;
+// Hash password before saving
+userSchema.pre("save", async function (next) {
+  if (!this.isModified("password")) return next();
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
+  next();
 });
 
-// Compare password
+// Compare password helper
 userSchema.methods.matchPassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };
